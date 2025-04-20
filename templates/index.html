@@ -4,41 +4,168 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Solar Panel Detection</title>
-    <link rel="stylesheet" href="static/css/style.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <div class="background-animation"></div>
+    <div class="scroll-progress"></div>
+    <div class="background"></div>
+    <div class="particles">
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+    </div>
     <div class="container">
         <h1>Solar Panel Detection</h1>
         <form id="uploadForm" enctype="multipart/form-data">
-            <input type="file" name="image" id="fileInput" accept="image/*" required>
+            <input type="file" name="image" id="fileInput" accept="image/*,.tif,.tiff" required>
             <button type="submit">Upload & Detect</button>
         </form>
         <div id="result" class="hidden">
-            <h2>Detection Result</h2>
-            <img id="detectedImage" src="" alt="Detected Image">
-            <p><strong>Solar Panels Detected:</strong> <span id="panelCount"></span></p>
-            <p><strong>Total Area Covered:</strong> <span id="panelArea"></span> pixels²</p>
+            <div class="result-header">
+                <h2>Detection Result</h2>
+            </div>
+            <div class="result-content">
+                <div class="result-image">
+                    <img id="detectedImage" src="" alt="Detected Image">
+                </div>
+                <div class="result-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">Solar Panels Detected:</span>
+                        <span class="stat-value" id="panelCount">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Area Covered:</span>
+                        <span class="stat-value" id="panelArea">0 pixels²</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
+    
+    <button class="scroll-top" onclick="scrollToTop()">↑</button>
     
     <script>
         document.getElementById('uploadForm').onsubmit = async function (e) {
             e.preventDefault();
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select an image file');
+                return;
+            }
+
+            // Check file size (max 10MB)
+            if (file.size > 10 * 1024 * 1024) {
+                alert('File size should be less than 10MB');
+                return;
+            }
+
+            // Show loading state
+            const button = document.querySelector('button[type="submit"]');
+            const originalText = button.textContent;
+            button.textContent = 'Processing...';
+            button.disabled = true;
+
+            // Show result container
+            document.getElementById('result').classList.remove("hidden");
+
             let formData = new FormData();
-            let file = document.getElementById('fileInput').files[0];
             formData.append("image", file);
             
-            let response = await fetch("/upload", { method: "POST", body: formData });
-            let data = await response.json();
+            try {
+                let response = await fetch("/upload", { 
+                    method: "POST", 
+                    body: formData 
+                });
 
-            if (data.result_image) {
-                document.getElementById('detectedImage').src = data.result_image;
-                document.getElementById('panelCount').textContent = data.solar_panel_count;
-                document.getElementById('panelArea').textContent = data.total_area;
-                document.getElementById('result').classList.remove("hidden");
+                if (!response.ok) {
+                    throw new Error('Server error: ' + response.status);
+                }
+
+                let data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                if (data.result_image) {
+                    const img = document.getElementById('detectedImage');
+                    img.src = data.result_image;
+                    
+                    // Update stats
+                    document.getElementById('panelCount').textContent = data.solar_panel_count;
+                    document.getElementById('panelArea').textContent = data.total_area + ' pixels²';
+                    
+                    // Scroll to result
+                    scrollToResult();
+                } else {
+                    throw new Error('No result image received');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error processing image: ' + error.message);
+                document.getElementById('result').classList.add("hidden");
+            } finally {
+                // Reset button state
+                button.textContent = originalText;
+                button.disabled = false;
             }
         };
+
+        // Preview image before upload
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = document.getElementById('detectedImage');
+                    // For TIF files, we'll show a placeholder
+                    if (file.type === 'image/tiff' || file.name.toLowerCase().endsWith('.tif') || file.name.toLowerCase().endsWith('.tiff')) {
+                        img.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+                        img.alt = 'TIF file selected - Processing...';
+                    } else {
+                        img.src = e.target.result;
+                    }
+                    document.getElementById('result').classList.remove("hidden");
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Scroll to top functionality
+        const scrollTopBtn = document.querySelector('.scroll-top');
+        const scrollProgress = document.querySelector('.scroll-progress');
+
+        window.addEventListener('scroll', () => {
+            // Show/hide scroll to top button
+            if (window.scrollY > 300) {
+                scrollTopBtn.classList.add('visible');
+            } else {
+                scrollTopBtn.classList.remove('visible');
+            }
+
+            // Update scroll progress
+            const winScroll = document.body.scrollTop || document.documentElement.scrollTop;
+            const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+            const scrolled = (winScroll / height) * 100;
+            scrollProgress.style.transform = `scaleX(${scrolled / 100})`;
+        });
+
+        function scrollToTop() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        }
+
+        // Smooth scroll to result section
+        function scrollToResult() {
+            const resultSection = document.getElementById('result');
+            if (resultSection) {
+                resultSection.scrollIntoView({ behavior: 'smooth' });
+            }
+        }
     </script>
 </body>
 </html>

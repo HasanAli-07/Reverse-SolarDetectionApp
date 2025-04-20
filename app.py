@@ -7,6 +7,9 @@ from ultralytics import YOLO
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from werkzeug.utils import secure_filename
+from PIL import Image
+import io
+import base64
 
 app = Flask(__name__)
 
@@ -59,61 +62,77 @@ def upload_file():
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
 
-    # Secure filename
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(filepath)
-
-    # Load and preprocess image
-    image = cv2.imread(filepath)
-    if image is None:
-        return jsonify({'error': 'Invalid image format'}), 400
-
-    # Process image with YOLO model
-    results = model(filepath)
-
-    # Extract bounding boxes
-    detected_image = image.copy()
-    total_area = 0
-    solar_panel_count = 0
-
-    for box in results[0].boxes.data.cpu().numpy():  # Extract bounding boxes safely
-        x1, y1, x2, y2, confidence, class_id = map(int, box[:6])
+    try:
+        # Save uploaded file
+        filename = secure_filename(file.filename)
+        upload_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(upload_path)
         
-        # Draw bounding box
-        label = f"Solar Panel: {confidence:.2f}"
-        cv2.rectangle(detected_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(detected_image, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        # Read image file
+        img = Image.open(upload_path)
+        
+        # Convert to RGB if needed
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        # Convert to numpy array
+        image = np.array(img)
+        
+        # Convert BGR to RGB (for OpenCV)
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
-        # Calculate area
-        area = (x2 - x1) * (y2 - y1)
-        total_area += area
-        solar_panel_count += 1
+        # Process image with YOLO model
+        results = model(image)
 
-    # Save processed image
-    result_filename = f"detected_{filename}"
-    result_image_path = os.path.join(RESULT_FOLDER, result_filename)
-    cv2.imwrite(result_image_path, detected_image)
+        # Extract bounding boxes
+        detected_image = image.copy()
+        total_area = 0
+        solar_panel_count = 0
 
-    # Save to Database
-    detection_entry = DetectionResult(
-        filename=filename,
-        result_image=result_image_path,
-        solar_panel_count=solar_panel_count,
-        total_area=total_area
-    )
-    db.session.add(detection_entry)
-    db.session.commit()
+        for box in results[0].boxes.data.cpu().numpy():
+            x1, y1, x2, y2, confidence, class_id = map(int, box[:6])
+            
+            # Draw bounding box
+            label = f"Solar Panel: {confidence:.2f}"
+            cv2.rectangle(detected_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(detected_image, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-    return jsonify({
-        'result_image': f'/static/results/{result_filename}',
-        'solar_panel_count': solar_panel_count,
-        'total_area': total_area
-    })
+            # Calculate area
+            area = (x2 - x1) * (y2 - y1)
+            total_area += area
+            solar_panel_count += 1
+
+        # Save result image
+        result_filename = f"result_{filename}"
+        result_path = os.path.join(RESULT_FOLDER, result_filename)
+        cv2.imwrite(result_path, detected_image)
+
+        # Convert result image to base64 for immediate display
+        _, buffer = cv2.imencode('.jpg', detected_image, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        result_image_base64 = base64.b64encode(buffer).decode('utf-8')
+
+        # Save to Database
+        detection_entry = DetectionResult(
+            filename=filename,
+            result_image=result_filename,  # Store filename instead of base64
+            solar_panel_count=solar_panel_count,
+            total_area=total_area
+        )
+        db.session.add(detection_entry)
+        db.session.commit()
+
+        return jsonify({
+            'result_image': f'data:image/jpeg;base64,{result_image_base64}',
+            'solar_panel_count': solar_panel_count,
+            'total_area': total_area
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/static/results/<filename>')
 def serve_result(filename):
     return send_from_directory(RESULT_FOLDER, filename)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=8080)
