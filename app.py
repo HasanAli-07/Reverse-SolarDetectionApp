@@ -60,15 +60,26 @@ def upload_file():
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
 
-    # Secure filename
-    filename = secure_filename(file.filename)
+    # Secure filename and force conversion to .jpg for YOLO compatibility
+    original_filename = secure_filename(file.filename)
+    name_without_ext, _ = os.path.splitext(original_filename)
+    filename = f"{name_without_ext}.jpg"
     filepath = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(filepath)
-
-    # Load and preprocess image
-    image = cv2.imread(filepath)
+    
+    # Save the original file temporarily
+    temp_path = os.path.join(UPLOAD_FOLDER, f"temp_{original_filename}")
+    file.save(temp_path)
+    
+    # Read using OpenCV and save as a standard .jpg
+    image = cv2.imread(temp_path)
     if image is None:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
         return jsonify({'error': 'Invalid image format'}), 400
+    
+    cv2.imwrite(filepath, image)
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
 
     # Process image with YOLO model
     results = model(filepath)
