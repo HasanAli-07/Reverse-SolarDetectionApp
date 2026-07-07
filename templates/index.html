@@ -14,6 +14,10 @@
             <input type="file" name="image" id="fileInput" accept="image/*" required>
             <button type="submit">Upload & Detect</button>
         </form>
+        <div id="loader" class="hidden">
+            <div class="spinner"></div>
+            <p class="loader-text">Analyzing satellite imagery with YOLOv8...</p>
+        </div>
         <div id="result" class="hidden">
             <h2>Detection Result</h2>
             <img id="detectedImage" src="" alt="Detected Image">
@@ -29,14 +33,30 @@
             let file = document.getElementById('fileInput').files[0];
             formData.append("image", file);
             
-            let response = await fetch("/upload", { method: "POST", body: formData });
-            let data = await response.json();
-
-            if (data.result_image) {
-                document.getElementById('detectedImage').src = data.result_image;
-                document.getElementById('panelCount').textContent = data.solar_panel_count;
-                document.getElementById('panelArea').textContent = data.total_area;
-                document.getElementById('result').classList.remove("hidden");
+            // Show loader and hide previous result
+            document.getElementById('result').classList.add("hidden");
+            document.getElementById('loader').classList.remove("hidden");
+            let submitBtn = e.target.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Processing...";
+            
+            try {
+                let response = await fetch("/upload", { method: "POST", body: formData });
+                let data = await response.json();
+        
+                if (data.result_image) {
+                    document.getElementById('detectedImage').src = data.result_image;
+                    document.getElementById('panelCount').textContent = data.solar_panel_count;
+                    document.getElementById('panelArea').textContent = data.total_area;
+                    document.getElementById('result').classList.remove("hidden");
+                }
+            } catch (error) {
+                console.error(error);
+                alert("An error occurred during detection.");
+            } finally {
+                document.getElementById('loader').classList.add("hidden");
+                submitBtn.disabled = false;
+                submitBtn.textContent = "Upload & Detect";
             }
         };
     </script>
